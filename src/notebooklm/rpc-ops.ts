@@ -479,29 +479,65 @@ export async function addSourcesRpc(
   const before = await listRawSources(page, notebookId);
   const known = new Set(before.map(sourceId));
 
-  const urls = input.content.split(/\s+/).filter(Boolean);
-  const entries =
-    input.type === "text"
-      ? [
-          [
-            null,
-            [input.title?.trim() || "Pasted text", input.content],
-            null,
-            2,
-            null,
-            null,
-            null,
-            null,
-            null,
-            null,
-            1,
-          ],
-        ]
-      : urls.map((url) =>
-          input.type === "youtube" || /youtube\.com|youtu\.be/i.test(url)
-            ? [null, null, null, null, null, null, null, [url], null, null, 1]
-            : [null, null, [url], null, null, null, null, null, null, null, 1]
-        );
+  if (input.type !== "text" && input.type !== "url" && input.type !== "youtube") {
+    throw new Error(
+      `Unsupported source type "${(input as { type: string }).type}". Expected "text", "url", or "youtube".`
+    );
+  }
+
+  const urls: string[] = [];
+  let entries: unknown[];
+
+  if (input.type === "text") {
+    entries = [
+      [
+        null,
+        [input.title?.trim() || "Pasted text", input.content],
+        null,
+        2,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        1,
+      ],
+    ];
+  } else {
+    const rawTokens = input.content.split(/\s+/).filter(Boolean);
+    const invalidTokens: string[] = [];
+
+    for (const token of rawTokens) {
+      try {
+        const parsed = new URL(token);
+        if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+          urls.push(token);
+        } else {
+          invalidTokens.push(token);
+        }
+      } catch {
+        invalidTokens.push(token);
+      }
+    }
+
+    if (invalidTokens.length > 0) {
+      const sample = invalidTokens
+        .slice(0, 3)
+        .map((t) => `"${t}"`)
+        .join(", ");
+      throw new Error(
+        `Cannot add sources for type "${input.type}": ${invalidTokens.length} token(s) are not valid HTTP/HTTPS URLs (e.g. ${sample}). ` +
+          `If you intended to add pasted text or markdown content, set \`type: "text"\`.`
+      );
+    }
+
+    entries = urls.map((url) =>
+      input.type === "youtube" || /youtube\.com|youtu\.be/i.test(url)
+        ? [null, null, null, null, null, null, null, [url], null, null, 1]
+        : [null, null, [url], null, null, null, null, null, null, null, 1]
+    );
+  }
   if (entries.length === 0) throw new Error(`\`content\` is required for type "${input.type}".`);
 
   let ids: string[] = [];
